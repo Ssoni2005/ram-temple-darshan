@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#1b0d08" />
+    <title>Shri Ram Mandir — Sacred Walkthrough</title>
+    <style id="boot-critical">
+      html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#100705;color:#fff8e8}
+      body.app-loading #app>:not(#loading){display:none!important}
+      body.app-loading #loading{display:flex!important;visibility:visible!important;opacity:1!important}
+      #loading{position:fixed;inset:0;z-index:9999;display:flex;flex-direction:column;align-items:center;justify-content:center;background:radial-gradient(circle at 50% 43%,#3a180c 0,#1b0b07 34%,#0d0504 78%);font-family:system-ui,sans-serif}
+      .loader-diya{position:relative;width:120px;height:132px;margin-bottom:10px;filter:drop-shadow(0 14px 24px rgba(0,0,0,.34))}
+      .loader-aura{position:absolute;left:50%;top:7px;width:92px;height:92px;transform:translateX(-50%);border-radius:50%;background:radial-gradient(circle,rgba(255,190,70,.28),rgba(255,123,26,.08) 45%,transparent 72%);animation:loaderAura 2.2s ease-in-out infinite}
+      .loader-flame{position:absolute;left:50%;top:12px;width:30px;height:52px;transform:translateX(-50%);border-radius:55% 45% 52% 48%/70% 70% 30% 30%;background:linear-gradient(180deg,#fff8ce 0%,#ffd36a 28%,#ff8a24 70%,rgba(221,74,9,.15) 100%);transform-origin:50% 100%;box-shadow:0 0 14px rgba(255,218,105,.9),0 0 36px rgba(255,119,25,.6);animation:loaderFlame .82s ease-in-out infinite alternate}
+      .loader-flame:before{content:"";position:absolute;left:50%;bottom:7px;width:12px;height:25px;transform:translateX(-50%);border-radius:55% 45% 52% 48%/70% 70% 30% 30%;background:linear-gradient(180deg,#fff 0%,#fff4b1 42%,#ffb53f 100%);opacity:.9}
+      .loader-wick{position:absolute;left:50%;top:61px;width:4px;height:15px;transform:translateX(-50%) rotate(-5deg);border-radius:3px;background:#32180e}
+      .loader-bowl{position:absolute;left:50%;top:68px;width:92px;height:43px;transform:translateX(-50%);border-radius:8px 8px 46px 46px/8px 8px 32px 32px;background:linear-gradient(180deg,#e99b4f 0%,#bf6326 45%,#713015 100%);border:2px solid rgba(255,199,113,.42);box-shadow:inset 0 5px 7px rgba(255,219,147,.2),inset 0 -8px 11px rgba(67,20,7,.4)}
+      .loader-bowl:before{content:"";position:absolute;left:8px;right:8px;top:-7px;height:15px;border-radius:50%;background:radial-gradient(ellipse at center,#4b2111 0 54%,#d47a35 58% 75%,#7a3518 78%)}
+      .loader-foot{position:absolute;left:50%;top:106px;width:43px;height:13px;transform:translateX(-50%);border-radius:0 0 20px 20px;background:linear-gradient(180deg,#9a451d,#5e250f)}
+      .loading-title{margin-top:2px;font:600 18px Georgia,serif;letter-spacing:.03em}.loading-sub{margin-top:8px;color:#c9b79e;font-size:12px}.progress{width:min(320px,66vw);height:4px;background:rgba(255,255,255,.08);border-radius:999px;margin-top:22px;overflow:hidden}.progress span{display:block;width:0;height:100%;background:linear-gradient(90deg,#ad4a10,#ffbe58,#ffe5a6);transition:width .2s}.progress-text{margin-top:9px;font-size:10px;color:#a89681}
+      @keyframes loaderFlame{0%{transform:translateX(-50%) rotate(-3deg) scale(.94,1.02)}35%{transform:translateX(-50%) rotate(2deg) scale(1.03,.96)}68%{transform:translateX(-50%) rotate(-1deg) scale(.98,1.05)}100%{transform:translateX(-50%) rotate(4deg) scale(1.02,.98)}}
+      @keyframes loaderAura{50%{transform:translateX(-50%) scale(1.12);opacity:.68}}
+    </style>
+  </head>
+  <body class="app-loading">
+    <div id="app">
+      <canvas id="scene"></canvas>
+
+      <div id="loading" class="loading-screen">
+        <div class="loader-diya" aria-hidden="true">
+          <div class="loader-aura"></div>
+          <div class="loader-flame"></div>
+          <div class="loader-wick"></div>
+          <div class="loader-bowl"></div>
+          <div class="loader-foot"></div>
+        </div>
+        <div class="loading-title">Preparing the sacred space</div>
+        <div class="loading-sub">Loading temple geometry and building collision map…</div>
+        <div class="progress"><span id="progressBar"></span></div>
+        <div id="progressText" class="progress-text">0%</div>
+      </div>
+
+      <header class="topbar glass">
+        <div class="brand">
+          <div class="brand-mark">श्री</div>
+          <div>
+            <strong>Shri Ram Mandir</strong>
+            <span>Sacred Walkthrough</span>
+          </div>
+        </div>
+        <div class="top-actions">
+          <button id="pilgrimageBtn" class="pill">Pilgrimage</button>
+          <button id="modeBtn" class="pill active">Walk Mode</button>
+          <button id="locationsBtn" class="pill" title="Named locations">Locations</button>
+          <button id="qualityBtn" class="pill" title="Rendering quality">Performance</button>
+          <button id="silenceBtn" class="icon-btn" title="Silence mode">◌</button>
+          <button id="languageBtn" class="icon-btn" title="Narration language">EN</button>
+          <button id="soundBtn" class="icon-btn active" title="Ambient sound and narration">♪</button>
+          <button id="helpBtn" class="icon-btn" title="Controls">?</button>
+        </div>
+      </header>
+
+      <aside id="locationNavigator" class="location-navigator glass">
+        <div class="location-nav-head">
+          <div>
+            <span>Walk Mode</span>
+            <strong>Locations</strong>
+          </div>
+          <button id="closeLocations" class="close-location" title="Collapse locations">‹</button>
+        </div>
+        <div id="locationList" class="location-list"></div>
+        <div class="location-nav-foot">
+          <button id="locationPrev" title="Previous location">← Previous</button>
+          <small id="locationTravelStatus">Current: <b id="locationCurrent">Main Gate</b></small>
+          <button id="locationNext" title="Next location">Next →</button>
+        </div>
+      </aside>
+
+      <div id="walkTransitionBadge" class="walk-transition-badge glass">
+        <span>Moving to</span>
+        <strong id="walkTransitionName">Location</strong>
+        <i><b id="walkTransitionProgress"></b></i>
+      </div>
+
+      <div id="zoneBanner" class="zone-banner glass">
+        <div class="zone-symbol">ॐ</div>
+        <div>
+          <span id="zoneKicker">Sacred Journey</span>
+          <strong id="zoneName">Temple Approach</strong>
+          <small id="zonePrompt">Proceed respectfully toward the main axis</small>
+        </div>
+      </div>
+
+      <div id="journeyProgress" class="journey-progress glass hidden">
+        <span id="journeyStageNo">1 / 8</span>
+        <div><strong id="journeyStage">Arrival</strong><small id="journeyCue">Orient yourself toward the temple</small></div>
+        <div class="journey-line"><i id="journeyLine"></i></div>
+      </div>
+
+      <div id="stillnessPrompt" class="stillness-prompt">Remain still for a moment…</div>
+      <div id="reflectionVerse" class="reflection-verse glass"></div>
+      <div id="pradakshinaStatus" class="pradakshina-status glass">Pradakshina · <span>0 / 4</span></div>
+
+      <div id="crosshair" class="crosshair"><i></i><b></b></div>
+      <div id="hoverTip" class="hover-tip"></div>
+
+      <aside id="infoPanel" class="info-panel glass">
+        <button id="closeInfo" class="close">×</button>
+        <div id="infoKicker" class="kicker">Sacred Space</div>
+        <h2 id="infoTitle">Temple Walkthrough</h2>
+        <p id="infoBody">Move through the temple and look toward glowing information markers to discover architectural and spiritual context.</p>
+        <div id="infoMeta" class="info-meta"></div>
+        <div class="depth-tabs"><button data-depth="brief" class="active">Brief</button><button data-depth="context">Context</button><button data-depth="scholarly">Deeper</button></div>
+      </aside>
+
+      <section class="bottom-dock glass">
+        <div class="dock-group time-group">
+          <span class="label">Time</span>
+          <button class="time-chip" data-hour="5.75">Brahma Muhurta</button>
+          <button class="time-chip active" data-hour="8">Morning</button>
+          <button class="time-chip" data-hour="12">Noon</button>
+          <button class="time-chip" data-hour="18.2">Aarti</button>
+          <button class="time-chip" data-hour="21">Night</button>
+        </div>
+        <div class="dock-group">
+          <span id="clockLabel">08:00</span>
+          <input id="timeSlider" type="range" min="0" max="24" step="0.05" value="8" />
+        </div>
+      </section>
+
+      <div class="walk-hint glass" id="walkHint">
+        <span><kbd>↑ / W</kbd> forward</span><span><kbd>↓ / S</kbd> back</span><span><kbd>← → / A D</kbd> turn</span><span><kbd>Drag mouse</kbd> look around</span>
+      </div>
+
+      <div id="enterOverlay" class="enter-overlay">
+        <div class="enter-card glass">
+          <div class="diya">✦</div>
+          <div class="eyebrow">AN INTERACTIVE DIGITAL PILGRIMAGE</div>
+          <h1>Enter the Temple</h1>
+          <p>Walk respectfully through the model with a TPS-style camera, experience changing light across the day, and discover contextual information at key spaces.</p>
+          <div class="entry-actions"><button id="enterBtn" class="primary">Free Explore</button><button id="pilgrimageEnterBtn" class="primary secondary">Begin Pilgrimage</button></div>
+          <small>Headphones recommended · Spatial ambience and zone narration enabled</small>
+        </div>
+      </div>
+
+      <div id="helpModal" class="modal hidden">
+        <div class="modal-card glass">
+          <button id="closeHelp" class="close">×</button>
+          <div class="kicker">Controls</div>
+          <h2>Explore naturally</h2>
+          <div class="control-grid">
+            <div><kbd>↑ / W · ↓ / S</kbd><span>Forward / backward</span></div>
+            <div><kbd>← → / A D</kbd><span>Turn left / right</span></div>
+            <div><kbd>Mouse drag</kbd><span>Street View-style look around</span></div>
+            <div><kbd>Mouse wheel</kbd><span>Zoom in / out</span></div>
+            <div><kbd>Shift</kbd><span>Walk faster</span></div>
+            <div><kbd>E</kbd><span>Open highlighted information</span></div>
+            <div><kbd>Esc</kbd><span>Release cursor</span></div>
+            <div><kbd>Pilgrimage</kbd><span>Guided sacred journey</span></div>
+            <div><kbd>Silence</kbd><span>Temple-only contemplative view</span></div>
+            <div><kbd>Mode</kbd><span>Contemplative Darshan viewpoints</span></div>
+            <div><kbd>Performance</kbd><span>Low-spec rendering; switch to Balanced for better shadows</span></div>
+          </div>
+          <p class="muted">Platforms, stairs, boundaries, walls, pillars and other modelled temple surfaces participate in collision detection. Entering a new architectural zone automatically changes contextual information, ambient sound, lighting emphasis, billboards and narration.</p>
+        </div>
+      </div>
+    <div id="darshanControls" class="darshan-controls glass hidden">
+      <button data-view="entrance">Entrance Axis</button><button data-view="mandapa">Mandapa</button><button data-view="shikhara">Shikhara</button><button data-view="pradakshina">Pradakshina</button><button data-view="sanctum">Sanctum Approach</button>
+    </div>
+
+    <aside id="guidePanel" class="guide-panel glass">
+      <button id="guideToggle" class="guide-toggle">Guide</button>
+      <div class="guide-content"><div class="kicker">Spiritual Companion</div><h3>Ask about this space</h3><div id="guideQuestions"></div><p id="guideAnswer">Choose a question for a brief, grounded explanation.</p></div>
+    </aside>
+
+    <div id="exitReflection" class="modal hidden"><div class="modal-card glass reflection-card"><div class="kicker">Quiet Reflection</div><h2>Carry the stillness outward</h2><p id="exitReflectionText">The journey through the temple moves from openness toward concentration, and then back toward the world outside.</p><button id="closeReflection" class="primary">Continue</button></div></div>
+    </div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
