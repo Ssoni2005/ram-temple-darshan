@@ -893,6 +893,19 @@ const progressText = document.querySelector('#progressText');
 const stl = new STLLoader();
 let visualReady = false;
 let collisionReady = false;
+let modelBytesReceived = 0;
+let modelProgressAt = performance.now();
+let modelLoadStartedAt = performance.now();
+let modelLoadFinished = false;
+
+function formatMB(bytes){
+  return (bytes / (1024 * 1024)).toFixed(bytes > 10 * 1024 * 1024 ? 1 : 2);
+}
+
+function setModelLoadMessage(message, pct = null){
+  if (pct != null) progressBar.style.width = `${THREE.MathUtils.clamp(pct, 2, 100)}%`;
+  progressText.textContent = message;
+}
 
 const templeMaterial = new THREE.MeshStandardMaterial({
   color: 0xdda998,
@@ -921,51 +934,131 @@ function finishTempleLoad() {
   placePlayerAtEntrance();
   updateTempleZone(true);
   updateWalkCamera(true);
+  modelLoadFinished = true;
+  progressBar.classList.remove('host-wait');
   progressBar.style.width = '100%';
   progressText.textContent = 'Ready';
-  // Keep the loader as the only visible UI until the full model, BVH and scene
-  // initialization have completed. Reveal the application behind the loader,
-  // then fade the loader away so no raw HTML/UI flashes at startup.
-  // The critical inline loader is present from the browser's first paint.
-  // Reveal the initialized app only underneath the still-opaque loader, then fade.
-  requestAnimationFrame(() => {
-    document.body.classList.remove('app-loading');
-    document.body.classList.add('app-ready');
-    requestAnimationFrame(() => loading.classList.add('done'));
+  // Deterministic hosted-build handoff. Do not depend on nested RAF callbacks:
+  // reveal the initialized app immediately beneath the opaque loader, then fade
+  // and disable the loader explicitly. A final timeout removes it from layout.
+  document.body.classList.remove('app-loading');
+  document.body.classList.add('app-ready');
+  loading.style.pointerEvents = 'none';
+  loading.style.opacity = '0';
+  loading.style.visibility = 'hidden';
+  loading.classList.add('done');
+  setTimeout(() => {
+    if (loading) loading.style.display = 'none';
+  }, 900);
+
+  // Ensure the entry screen is visible and interactive once loading is complete.
+  const entry = document.querySelector('#enterOverlay');
+  if (entry) {
+    entry.classList.remove('hidden');
+    entry.style.display = '';
+    entry.style.visibility = 'visible';
+    entry.style.opacity = '1';
+    entry.style.pointerEvents = 'auto';
+  }
+}
+
+const MODEL_URL = '/models/ram-temple-full.stl';
+
+async function preflightTempleModel(){
+  try{
+    const response = await fetch(MODEL_URL, { method:'HEAD', cache:'no-store' });
+    if(!response.ok){
+      throw new Error(`HTTP ${response.status} ${response.statusText}`);
+    }
+    const size = Number(response.headers.get('content-length')) || 0;
+    if(size){
+      setModelLoadMessage(`Temple file available · ${formatMB(size)} MB · starting download…`, 3);
+    }else{
+      setModelLoadMessage('Temple file available · host is streaming the model…', 3);
+      progressBar.classList.add('host-wait');
+    }
+    return true;
+  }catch(error){
+    console.error('Temple model preflight failed:', error);
+    progressBar.classList.add('load-error');
+    progressText.innerHTML = `Temple model is not reachable on this host. Check <code>${MODEL_URL}</code>.`;
+    return false;
+  }
+}
+
+async function loadOriginalTemple(){
+  modelLoadStartedAt = performance.now();
+  modelProgressAt = modelLoadStartedAt;
+  modelBytesReceived = 0;
+  modelLoadFinished = false;
+
+  const reachable = await preflightTempleModel();
+  if(!reachable) return;
+
+  stl.load(MODEL_URL, geometry => {
+    modelLoadFinished = true;
+    progressBar.classList.remove('host-wait');
+    setModelLoadMessage('Preparing full-detail collision map…', 78);
+
+    geometry.computeVertexNormals();
+    geometry.computeBoundingBox();
+    geometry.computeBoundingSphere();
+
+    setModelLoadMessage('Temple received · building collision map…', 84);
+    geometry.boundsTree = new MeshBVH(geometry, { maxLeafTris: 72, strategy: 0 });
+
+    temple = new THREE.Mesh(geometry, templeMaterial);
+    temple.name = 'Original Full Detail Ram Temple';
+    temple.castShadow = false;
+    temple.receiveShadow = true;
+    temple.frustumCulled = true;
+    scene.add(temple);
+    collider = temple;
+    visualReady = true;
+    collisionReady = true;
+    finishTempleLoad();
+  }, xhr => {
+    modelProgressAt = performance.now();
+    modelBytesReceived = xhr.loaded || modelBytesReceived;
+    const mb = formatMB(modelBytesReceived);
+
+    if(xhr.lengthComputable && xhr.total > 0){
+      progressBar.classList.remove('host-wait');
+      const pct = Math.min(74, Math.max(3, (xhr.loaded / xhr.total) * 74));
+      progressBar.style.width = `${pct}%`;
+      progressText.textContent = `Original temple ${Math.round(xhr.loaded / xhr.total * 100)}% · ${mb} MB received`;
+    }else{
+      progressBar.classList.add('host-wait');
+      const visualPct = Math.min(68, 8 + Math.log2(1 + modelBytesReceived / (1024 * 1024)) * 9);
+      progressBar.style.width = `${visualPct}%`;
+      progressText.textContent = `Receiving original temple · ${mb} MB received`;
+    }
+  }, err => {
+    modelLoadFinished = true;
+    progressBar.classList.remove('host-wait');
+    progressBar.classList.add('load-error');
+    console.error('Original temple load failed:', err);
+    progressText.innerHTML = `Original temple could not be loaded. Verify <code>${MODEL_URL}</code> is published by the host.`;
   });
 }
 
-progressText.textContent = 'Loading original full-detail temple…';
-stl.load('/models/ram-temple-full.stl', geometry => {
-  progressText.textContent = 'Preparing full-detail collision map…';
-  progressBar.style.width = '78%';
-  // Preserve the original triangle topology. Only smooth shading normals are
-  // calculated for rendering; no vertices or faces are changed or removed.
-  geometry.computeVertexNormals();
-  geometry.computeBoundingBox();
-  geometry.computeBoundingSphere();
-  geometry.boundsTree = new MeshBVH(geometry, { maxLeafTris: 72, strategy: 0 });
+loadOriginalTemple();
 
-  temple = new THREE.Mesh(geometry, templeMaterial);
-  temple.name = 'Original Full Detail Ram Temple';
-  temple.castShadow = false;
-  temple.receiveShadow = true;
-  temple.frustumCulled = true;
-  scene.add(temple);
-  collider = temple;
-  visualReady = true;
-  collisionReady = true;
-  finishTempleLoad();
-}, xhr => {
-  if (xhr.total) {
-    const pct = Math.min(74, (xhr.loaded / xhr.total) * 74);
-    progressBar.style.width = `${pct}%`;
-    progressText.textContent = `Original temple ${Math.round(xhr.loaded / xhr.total * 100)}%`;
+setInterval(() => {
+  if(modelLoadFinished) return;
+  const now = performance.now();
+  const quietFor = (now - modelProgressAt) / 1000;
+  const elapsed = (now - modelLoadStartedAt) / 1000;
+
+  if(modelBytesReceived === 0 && quietFor > 20){
+    progressBar.classList.add('host-wait');
+    progressText.textContent = elapsed > 60
+      ? 'Still waiting for the temple file from the host…'
+      : 'Waiting for the host to start sending the temple model…';
+  }else if(modelBytesReceived > 0 && quietFor > 15){
+    progressText.textContent = `Host paused temporarily · ${formatMB(modelBytesReceived)} MB received`;
   }
-}, err => {
-  console.error(err);
-  progressText.textContent = 'Original temple model could not be loaded';
-});
+}, 3000);
 
 // --- Player capsule ------------------------------------------------------------
 const player = {
@@ -2139,7 +2232,14 @@ renderer.domElement.addEventListener('wheel', e => {
 }, { passive:false });
 
 function beginExperience(pilgrimage=false){
-  document.querySelector('#enterOverlay').classList.add('hidden');
+  const entry = document.querySelector('#enterOverlay');
+  if(entry){
+    entry.classList.add('hidden');
+    entry.style.opacity = '0';
+    entry.style.visibility = 'hidden';
+    entry.style.pointerEvents = 'none';
+    setTimeout(() => { if(entry.classList.contains('hidden')) entry.style.display = 'none'; }, 500);
+  }
   ensureAudio();
   setPilgrimage(pilgrimage);
   walkEngaged=true; mode='walk';
@@ -2149,8 +2249,18 @@ function beginExperience(pilgrimage=false){
   experience.lastPosition.copy(player.position);
   updateTempleZone(true); updateWalkCamera(true); updateRitualEnvironment();
 }
-document.querySelector('#enterBtn').onclick=()=>beginExperience(false);
-document.querySelector('#pilgrimageEnterBtn').onclick=()=>beginExperience(true);
+const enterBtn = document.querySelector('#enterBtn');
+const pilgrimageEnterBtn = document.querySelector('#pilgrimageEnterBtn');
+if(enterBtn) enterBtn.addEventListener('click', e => {
+  e.preventDefault();
+  e.stopPropagation();
+  beginExperience(false);
+});
+if(pilgrimageEnterBtn) pilgrimageEnterBtn.addEventListener('click', e => {
+  e.preventDefault();
+  e.stopPropagation();
+  beginExperience(true);
+});
 document.querySelector('#pilgrimageBtn').onclick=()=>setPilgrimage(!experience.pilgrimage);
 document.querySelector('#silenceBtn').onclick=()=>setSilenceMode(!experience.silence);
 document.querySelector('#languageBtn').onclick=toggleLanguage;

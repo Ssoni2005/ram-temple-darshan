@@ -118,3 +118,16 @@ Walk Mode includes a `Locations` navigator with 18 curated stops:
 18. North Precinct
 
 Selecting a stop does not abruptly teleport the viewer. The app first preloads the full-fidelity stream bands required by the route, then moves the visitor with a smootherstep-eased, ground-following camera transition. Architectural branches use shared route hubs so transitions prefer meaningful circulation paths instead of drawing a direct line through temple masses. Manual Walk Mode controls resume automatically on arrival. Press `Esc` during a transition to cancel it.
+
+
+## Deploying on Render
+
+Use a **Static Site**, not a Node web service.
+
+- Build command: `npm install && npm run build`
+- Publish directory: `dist`
+- The original STL is copied from `public/models/ram-temple-full.stl` to `dist/models/ram-temple-full.stl` by Vite.
+- After deployment, test `<your-render-domain>/models/ram-temple-full.stl` directly. It should return the model file, not a 404 page.
+- `render.yaml` at the project root contains the same configuration.
+
+The model is large. Some CDNs do not expose a usable `Content-Length` while compressing or streaming it. The in-app loader therefore reports MB received even when a percentage cannot be calculated.

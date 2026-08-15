@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: ram-temple-walkthrough
+    runtime: static
+    buildCommand: npm install && npm run build
+    staticPublishPath: ./dist
+    headers:
+      - path: /models/*
+        name: Cache-Control
+        value: public, max-age=31536000, immutable
