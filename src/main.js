@@ -922,44 +922,50 @@ async function applyTempleStreaming(){ return true; }
 async function ensureAllTempleChunks(){ return true; }
 function updateTempleStreaming(){}
 
+let sceneFinalizationStarted=false;
 function finishTempleLoad() {
-  if (!visualReady || !collisionReady) return;
+  if (!visualReady || !collisionReady || sceneFinalizationStarted) return;
+  sceneFinalizationStarted=true;
   createTemplePrecinct();
   createSacredSurroundings();
   createSanctumShrine();
   createHotspots();
-  createLocationMarkers();
   createZoneBillboards();
   createAtmosphere();
   placePlayerAtEntrance();
-  updateTempleZone(true);
-  updateWalkCamera(true);
-  modelLoadFinished = true;
-  progressBar.classList.remove('host-wait');
-  progressBar.style.width = '100%';
-  progressText.textContent = 'Ready';
-  // Deterministic hosted-build handoff. Do not depend on nested RAF callbacks:
-  // reveal the initialized app immediately beneath the opaque loader, then fade
-  // and disable the loader explicitly. A final timeout removes it from layout.
-  document.body.classList.remove('app-loading');
-  document.body.classList.add('app-ready');
-  loading.style.pointerEvents = 'none';
-  loading.style.opacity = '0';
-  loading.style.visibility = 'hidden';
-  loading.classList.add('done');
-  setTimeout(() => {
-    if (loading) loading.style.display = 'none';
-  }, 900);
+  setModelLoadMessage('Mapping human-navigable surfaces…', 91);
 
-  // Ensure the entry screen is visible and interactive once loading is complete.
-  const entry = document.querySelector('#enterOverlay');
-  if (entry) {
-    entry.classList.remove('hidden');
-    entry.style.display = '';
-    entry.style.visibility = 'visible';
-    entry.style.opacity = '1';
-    entry.style.pointerEvents = 'auto';
-  }
+  // Let the loader paint the navigation-mapping stage before the connected-space
+  // analysis performs its CPU work.
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    buildNavigationSurface();
+    createLocationMarkers();
+    updateTempleZone(true);
+    updateWalkCamera(true);
+    modelLoadFinished = true;
+    progressBar.classList.remove('host-wait');
+    progressBar.style.width = '100%';
+    progressText.textContent = navigationSurface.ready
+      ? `Ready · ${navigationSurface.nodes.length} navigable cells mapped`
+      : 'Ready · navigation markers unavailable';
+
+    document.body.classList.remove('app-loading');
+    document.body.classList.add('app-ready');
+    loading.style.pointerEvents = 'none';
+    loading.style.opacity = '0';
+    loading.style.visibility = 'hidden';
+    loading.classList.add('done');
+    setTimeout(() => { if (loading) loading.style.display = 'none'; }, 900);
+
+    const entry = document.querySelector('#enterOverlay');
+    if (entry) {
+      entry.classList.remove('hidden');
+      entry.style.display = '';
+      entry.style.visibility = 'visible';
+      entry.style.opacity = '1';
+      entry.style.pointerEvents = 'auto';
+    }
+  }));
 }
 
 const MODEL_URL = '/models/ram-temple-full.stl';
@@ -1722,13 +1728,16 @@ function createLocationMarkers() {
       opacity: .94,
       depthTest: true,
       depthWrite: false,
+      // World scale is recalculated every frame to keep the dot at ~64 CSS px.
       sizeAttenuation: true,
       blending: THREE.NormalBlending
     }));
     const anchor = getLocationAnchor(loc);
-    const z = anchor.z + walkCam.eyeHeight;
-    marker.position.set(anchor.x, anchor.y, z);
-    marker.scale.set(2.8,2.8,1);
+    // Never render a navigation marker unless the human-capsule solver has
+    // actually found reachable standing space for it.
+    if(!anchor) return;
+    marker.position.set(anchor.x, anchor.y, anchor.eyeZ);
+    marker.scale.set(.5,.5,1);
     marker.renderOrder=12;
     marker.userData = { locationMarker:true, locationId:loc.id, title:loc.name, sub:loc.sub, index:i };
     locationMarkerGroup.add(marker);
@@ -1743,6 +1752,26 @@ function createLocationMarkers() {
     marker.add(label);
     marker.userData.label = label;
   });
+  // Runtime audit: every marker reports the surface, feet and camera-eye levels
+  // actually used. This makes hosted/deployment discrepancies easy to inspect.
+  console.table(walkLocations.map(loc => {
+    const a=getLocationAnchor(loc);
+    return a ? {location:loc.name,x:a.x.toFixed(2),y:a.y.toFixed(2),surfaceZ:a.surfaceZ.toFixed(2),feetZ:a.feetZ.toFixed(2),eyeZ:a.eyeZ.toFixed(2),navCell:a.navCell} : {location:loc.name,status:'NO VALID NAVIGATION POINT'};
+  }));
+}
+
+const LOCATION_DOT_PX = 64;
+const locationMarkerCameraSpace = new THREE.Vector3();
+
+function fixedPixelSpriteScale(sprite, pixels = LOCATION_DOT_PX){
+  // Convert a requested CSS-pixel diameter to world units at this sprite's
+  // camera-space depth. This keeps the marker visually ~64 px regardless of
+  // camera distance, zoom/FOV, screen resolution or device pixel ratio.
+  locationMarkerCameraSpace.copy(sprite.position).applyMatrix4(camera.matrixWorldInverse);
+  const depth = Math.max(.25, Math.abs(locationMarkerCameraSpace.z));
+  const viewportHeight = Math.max(1, renderer.domElement.clientHeight || window.innerHeight || 1);
+  const visibleWorldHeight = 2 * depth * Math.tan(THREE.MathUtils.degToRad(camera.fov * .5));
+  return (pixels / viewportHeight) * visibleWorldHeight;
 }
 
 function updateLocationMarkers(t) {
@@ -1751,10 +1780,11 @@ function updateLocationMarkers(t) {
   locationMarkers.forEach((m, i) => {
     const loc = walkLocationById.get(m.userData.locationId);
     const anchor = getLocationAnchor(loc);
+    if(!anchor){m.visible=false;return;}
     const dx = anchor.x - player.position.x;
     const dy = anchor.y - player.position.y;
     const dist = Math.hypot(dx, dy);
-    const sameZone = currentZoneId && zoneAt(anchor)?.id === currentZoneId;
+    const sameZone = currentZoneId && zoneAt(new THREE.Vector3(anchor.x,anchor.y,anchor.feetZ))?.id === currentZoneId;
     const isCurrent = currentWalkLocationId === loc.id;
     // Actual billboard-navigation layer: nearby markers remain readily discoverable,
     // while distant markers fade to keep the temple visually quiet.
@@ -1762,12 +1792,13 @@ function updateLocationMarkers(t) {
     m.visible = reveal;
     if (!reveal) return;
 
-    const bob = walkCam.eyeHeight + Math.sin(t * 1.55 + i * .55) * .06;
-    m.position.set(anchor.x, anchor.y, anchor.z + bob);
+    const bob = Math.sin(t * 1.55 + i * .55) * .035;
+    m.position.set(anchor.x, anchor.y, anchor.eyeZ + bob);
     const hover = activeLocationMarker === m;
-    const baseScale = hover ? 4.1 : (isCurrent ? 3.35 : 2.8);
-    const pulse = 1 + Math.sin(t * 2.0 + i * .7) * (hover ? .045 : .025);
-    m.scale.set(baseScale*pulse, baseScale*pulse, 1);
+    const fixedScale = fixedPixelSpriteScale(m, LOCATION_DOT_PX);
+    // Keep the physical screen footprint fixed. Hover/current state changes
+    // luminance only; it never makes the marker larger and obscure the view.
+    m.scale.set(fixedScale, fixedScale, 1);
     m.material.opacity = hover ? 1 : (isCurrent ? .98 : THREE.MathUtils.clamp(1-dist/150,.56,.93));
     if (m.userData.label) {
       m.userData.label.visible = hover;
@@ -1887,14 +1918,14 @@ let mode='walk';
 const walkLocations = [
   {id:'main-gate', name:'Main Gate', sub:'Primary parkota entrance', x:0, y:-178, yaw:0, parent:null, floorZ:0.12},
   {id:'outer-forecourt', name:'Outer Forecourt', sub:'Arrival court inside the gate', x:0, y:-150, yaw:0, parent:'main-gate', floorZ:0.12},
-  {id:'temple-approach', name:'Temple Approach', sub:'Principal processional axis', x:0, y:-116, yaw:0, parent:'outer-forecourt', floorZ:0.10},
+  {id:'temple-approach', name:'Temple Approach', sub:'Principal processional axis', x:-1, y:-114.5, yaw:0, parent:'outer-forecourt', floorZ:0.10},
   {id:'sacred-ascent', name:'Sacred Ascent', sub:'Main staircase', x:0, y:-89, yaw:0, parent:'temple-approach', floorZ:7.24},
-  {id:'entrance-platform', name:'Entrance Platform', sub:'Raised threshold', x:0, y:-62, yaw:0, parent:'sacred-ascent', floorZ:7.24},
-  {id:'mandapa-forecourt', name:'Mandapa Forecourt', sub:'Transition into the hall', x:0, y:-46, yaw:0, parent:'entrance-platform', floorZ:7.24},
-  {id:'main-mandapa', name:'Main Mandapa', sub:'Central pillared gathering space', x:0, y:-29, yaw:0, parent:'mandapa-forecourt', floorZ:7.24},
+  {id:'entrance-platform', name:'Entrance Platform', sub:'Raised threshold', x:-1, y:-62, yaw:0, parent:'sacred-ascent', floorZ:7.24},
+  {id:'mandapa-forecourt', name:'Mandapa Forecourt', sub:'Transition into the hall', x:-1, y:-46, yaw:0, parent:'entrance-platform', floorZ:7.24},
+  {id:'main-mandapa', name:'Main Mandapa', sub:'Central pillared gathering space', x:-1, y:-29, yaw:0, parent:'mandapa-forecourt', floorZ:7.24},
   {id:'east-pillared-hall', name:'East Pillared Hall', sub:'Eastern column rhythm', x:23, y:-11, yaw:-1.15, parent:'main-mandapa', floorZ:7.24},
   {id:'west-pillared-hall', name:'West Pillared Hall', sub:'Western column rhythm', x:-23, y:-11, yaw:1.15, parent:'main-mandapa', floorZ:7.24},
-  {id:'inner-axis', name:'Inner Processional Axis', sub:'Central inward movement', x:0, y:18, yaw:0, parent:'main-mandapa', floorZ:7.24},
+  {id:'inner-axis', name:'Inner Processional Axis', sub:'Central inward movement', x:-1, y:18, yaw:0, parent:'main-mandapa', floorZ:7.24},
   {id:'east-pradakshina', name:'East Pradakshina', sub:'Eastern circumambulatory path', x:33, y:29, yaw:0.15, parent:'inner-axis', floorZ:7.24},
   {id:'west-pradakshina', name:'West Pradakshina', sub:'Western circumambulatory path', x:-33, y:29, yaw:-0.15, parent:'inner-axis', floorZ:7.24},
   {id:'inner-hall', name:'Inner Hall', sub:'Quieter inward threshold', x:-6, y:48, yaw:0.12, parent:'inner-axis', floorZ:7.24},
@@ -1908,7 +1939,6 @@ const walkLocationById = new Map(walkLocations.map(l=>[l.id,l]));
 const walkLocationAnchorById = new Map();
 let currentWalkLocationId = 'temple-approach';
 let walkTransition = null;
-let locationUiBuilt = false;
 
 function nearestWalkLocation(pos=player.position) {
   let best=walkLocations[0], bestD=Infinity;
@@ -1922,42 +1952,205 @@ function locationGroundZ(l){
   return Number.isFinite(l.floorZ) ? l.floorZ + .08 : groundHeightAt(l.x,l.y,18)+.08;
 }
 
-function getLocationAnchor(l){
-  let anchor = walkLocationAnchorById.get(l.id);
-  if(anchor) return anchor;
-  const safe = resolveSafeLocationTarget(l);
-  anchor = new THREE.Vector3(safe.x, safe.y, safe.z);
-  walkLocationAnchorById.set(l.id, anchor);
-  return anchor;
+// --- Human navigation surface -------------------------------------------------
+// Navigation is derived from free space, not from triangle normals. A point belongs
+// to the navigation surface only when the same human capsule used by Walk Mode can
+// stand there AND that point is connected to the entrance through neighboring valid
+// standing positions. This intentionally excludes isolated roofs, ledges and cavities.
+const navigationSurface = {
+  ready:false,
+  step:3.5,
+  minX:-98,
+  maxX:98,
+  minY:-188.5,
+  maxY:161.5,
+  maxNodes:6000,
+  nodes:[],
+  byCell:new Map(),
+  buildMs:0,
+};
+window.__templeNavigation = navigationSurface;
+
+function navCellKey(ix,iy){ return `${ix},${iy}`; }
+function navCellForXY(x,y){
+  return {
+    ix:Math.round((x-navigationSurface.minX)/navigationSurface.step),
+    iy:Math.round((y-navigationSurface.minY)/navigationSurface.step)
+  };
+}
+function navXYForCell(ix,iy){
+  return {
+    x:navigationSurface.minX+ix*navigationSurface.step,
+    y:navigationSurface.minY+iy*navigationSurface.step
+  };
 }
 
-// Verify direct-jump destinations against the live BVH. This protects against a
-// future coordinate edit accidentally placing the capsule inside a wall or pillar.
-function resolveSafeLocationTarget(target){
-  const baseZ=locationGroundZ(target);
-  const offsets=[
-    [0,0],[1,0],[-1,0],[0,1],[0,-1],[2,0],[-2,0],[0,2],[0,-2],
-    [2,2],[-2,2],[2,-2],[-2,-2],[3,0],[-3,0],[0,3],[0,-3],
-    [4,0],[-4,0],[0,4],[0,-4],[5,0],[-5,0],[0,5],[0,-5],
-  ];
+function collectSupportHeightsNear(x,y,referenceFeetZ,up=1.25,down=1.45){
+  // Intersections are merely candidate support heights. We deliberately do not
+  // inspect face normals. Human-capsule occupancy decides whether a candidate is usable.
+  const top=referenceFeetZ+up;
+  const bottom=referenceFeetZ-down;
+  const ray=new THREE.Raycaster(new THREE.Vector3(x,y,top),new THREE.Vector3(0,0,-1),0,top-bottom);
+  ray.firstHitOnly=false;
+  const heights=[];
+  [collider,precinctCollider].forEach(mesh=>{
+    if(!mesh)return;
+    const hits=ray.intersectObject(mesh,false);
+    for(const hit of hits){
+      const z=hit.point.z;
+      if(z<bottom-.02||z>top+.02)continue;
+      if(!heights.some(v=>Math.abs(v-z)<.055))heights.push(z);
+    }
+  });
+  heights.sort((a,b)=>Math.abs((a+.08)-referenceFeetZ)-Math.abs((b+.08)-referenceFeetZ));
+  return heights;
+}
+
+function testCapsuleStanding(x,y,surfaceZ){
+  const intended=new THREE.Vector3(x,y,surfaceZ+.08);
+  player.position.copy(intended);
+  // Fractionally penetrate support so collision must resolve onto a real surface.
+  player.position.z-=.075;
+  player.velocity.set(0,0,-.1);
+  player.onGround=false;
+  resolveCapsuleCollisions();
+  resolveCapsuleCollisions();
+  const resolved=player.position.clone();
+  const horizontal=Math.hypot(resolved.x-intended.x,resolved.y-intended.y);
+  const vertical=Math.abs(resolved.z-intended.z);
+  if(horizontal>.13||vertical>.22)return null;
+  return {x:resolved.x,y:resolved.y,feetZ:resolved.z,surfaceZ:resolved.z-.08};
+}
+
+function findStandableNearHeight(x,y,referenceFeetZ,up=1.25,down=1.45){
+  const heights=collectSupportHeightsNear(x,y,referenceFeetZ,up,down);
+  for(const surfaceZ of heights.slice(0,10)){
+    const standing=testCapsuleStanding(x,y,surfaceZ);
+    if(standing)return standing;
+  }
+  return null;
+}
+
+function edgeIsHumanNavigable(a,b){
+  const dz=Math.abs(b.feetZ-a.feetZ);
+  if(dz>1.05)return false;
+  const dist=Math.hypot(b.x-a.x,b.y-a.y);
+  if(dist>navigationSurface.step*1.5)return false;
+  // Test intermediate body positions. This prevents the graph from connecting
+  // through a wall merely because walkable floors exist on both sides of it.
+  for(const t of [.5]){
+    const x=THREE.MathUtils.lerp(a.x,b.x,t);
+    const y=THREE.MathUtils.lerp(a.y,b.y,t);
+    const expected=THREE.MathUtils.lerp(a.feetZ,b.feetZ,t);
+    const mid=findStandableNearHeight(x,y,expected,.8,.9);
+    if(!mid)return false;
+    if(Math.abs(mid.feetZ-expected)>.48)return false;
+  }
+  return true;
+}
+
+function seedNavigationSurface(){
+  const preferred={x:player.position.x,y:player.position.y,feetZ:player.position.z};
+  let standing=findStandableNearHeight(preferred.x,preferred.y,preferred.feetZ,1.1,1.3);
+  if(standing)return standing;
+  // Small local search only for seed recovery; this is not a location fallback.
+  for(const r of [1,2,3,4]){
+    for(let i=0;i<12;i++){
+      const a=i/12*Math.PI*2;
+      const x=preferred.x+Math.cos(a)*r, y=preferred.y+Math.sin(a)*r;
+      standing=findStandableNearHeight(x,y,preferred.feetZ,1.3,1.5);
+      if(standing)return standing;
+    }
+  }
+  return null;
+}
+
+function buildNavigationSurface(){
+  const started=performance.now();
+  navigationSurface.nodes.length=0;
+  navigationSurface.byCell.clear();
+  navigationSurface.ready=false;
+  walkLocationAnchorById.clear();
+
   const savedPos=player.position.clone();
   const savedVel=player.velocity.clone();
   const savedGround=player.onGround;
-  let best=null;
-  for(const [dx,dy] of offsets){
-    const intended=new THREE.Vector3(target.x+dx,target.y+dy,baseZ);
-    player.position.copy(intended); player.velocity.set(0,0,0);
-    resolveCapsuleCollisions(); resolveCapsuleCollisions();
-    const horizontal=Math.hypot(player.position.x-intended.x,player.position.y-intended.y);
-    const vertical=Math.abs(player.position.z-intended.z);
-    if(horizontal<0.10 && vertical<0.65){
-      best={x:player.position.x,y:player.position.y,z:player.position.z};
-      break;
+  const seed=seedNavigationSurface();
+  if(!seed){
+    console.error('Navigation surface: no valid entrance seed found.');
+    player.position.copy(savedPos);player.velocity.copy(savedVel);player.onGround=savedGround;
+    return;
+  }
+
+  const seedCell=navCellForXY(seed.x,seed.y);
+  const seedXY=navXYForCell(seedCell.ix,seedCell.iy);
+  const snappedSeed=findStandableNearHeight(seedXY.x,seedXY.y,seed.feetZ,1.3,1.5)||seed;
+  const first={...snappedSeed,ix:seedCell.ix,iy:seedCell.iy};
+  navigationSurface.nodes.push(first);
+  navigationSurface.byCell.set(navCellKey(first.ix,first.iy),first);
+  const queue=[first];
+  let q=0;
+  const dirs=[[1,0],[-1,0],[0,1],[0,-1]];
+
+  while(q<queue.length && navigationSurface.nodes.length<navigationSurface.maxNodes){
+    const current=queue[q++];
+    for(const [dx,dy] of dirs){
+      const ix=current.ix+dx, iy=current.iy+dy;
+      const xy=navXYForCell(ix,iy);
+      if(xy.x<navigationSurface.minX||xy.x>navigationSurface.maxX||xy.y<navigationSurface.minY||xy.y>navigationSurface.maxY)continue;
+      const key=navCellKey(ix,iy);
+      if(navigationSurface.byCell.has(key))continue;
+      // Mark as visited before the expensive test; null means non-navigation cell.
+      navigationSurface.byCell.set(key,null);
+      const candidate=findStandableNearHeight(xy.x,xy.y,current.feetZ,1.05,1.35);
+      if(!candidate)continue;
+      if(!edgeIsHumanNavigable(current,candidate))continue;
+      const node={...candidate,ix,iy};
+      navigationSurface.byCell.set(key,node);
+      navigationSurface.nodes.push(node);
+      queue.push(node);
     }
   }
-  player.position.copy(savedPos); player.velocity.copy(savedVel); player.onGround=savedGround;
-  return best || {x:target.x,y:target.y,z:baseZ};
+
+  player.position.copy(savedPos);player.velocity.copy(savedVel);player.onGround=savedGround;
+  navigationSurface.ready=navigationSurface.nodes.length>0;
+  navigationSurface.buildMs=performance.now()-started;
+  console.info(`Navigation surface: ${navigationSurface.nodes.length} connected human-standing cells in ${navigationSurface.buildMs.toFixed(0)} ms.`);
 }
+
+function nearestNavigationNode(x,y,maxDistance=18){
+  if(!navigationSurface.ready)return null;
+  let best=null,bestD2=maxDistance*maxDistance;
+  for(const n of navigationSurface.nodes){
+    const dx=n.x-x,dy=n.y-y,d2=dx*dx+dy*dy;
+    if(d2<bestD2){bestD2=d2;best=n;}
+  }
+  return best;
+}
+
+function getLocationAnchor(l){
+  if(walkLocationAnchorById.has(l.id))return walkLocationAnchorById.get(l.id);
+  // Crucially: floorZ is not used. The named XY is only a semantic hint. The
+  // actual destination must be a point on the entrance-connected navigation surface.
+  const node=nearestNavigationNode(l.x,l.y,20);
+  if(!node){
+    walkLocationAnchorById.set(l.id,null);
+    console.warn(`No entrance-connected navigation surface near ${l.name}`);
+    return null;
+  }
+  const anchor={
+    x:node.x,y:node.y,feetZ:node.feetZ,surfaceZ:node.surfaceZ,
+    eyeZ:node.feetZ+walkCam.eyeHeight,navCell:`${node.ix},${node.iy}`
+  };
+  walkLocationAnchorById.set(l.id,anchor);
+  return anchor;
+}
+
+function resolveSafeLocationTarget(target){
+  const a=getLocationAnchor(target);
+  return a?{x:a.x,y:a.y,z:a.feetZ,surfaceZ:a.surfaceZ}:null;
+}
+
 function setTransitionBadge(target,progress=0,show=false){
   const badge=document.querySelector('#walkTransitionBadge');
   if(!badge)return;
@@ -1965,22 +2158,11 @@ function setTransitionBadge(target,progress=0,show=false){
   const name=document.querySelector('#walkTransitionName'); if(name)name.textContent=target?.name||'';
   const bar=document.querySelector('#walkTransitionProgress'); if(bar)bar.style.width=`${Math.round(progress*100)}%`;
 }
-function setLocationTravelStatus(text){const el=document.querySelector('#locationTravelStatus');if(el)el.textContent=text;}
-function refreshLocationNavigator(){
-  const near=nearestWalkLocation(); currentWalkLocationId=near.id;
-  const current=document.querySelector('#locationCurrent'); if(current)current.textContent=near.name;
-  document.querySelectorAll('.location-item').forEach(b=>b.classList.toggle('active',b.dataset.location===near.id));
+function refreshCurrentWalkLocation(){
+  const near=nearestWalkLocation();
+  currentWalkLocationId=near.id;
 }
-function buildLocationNavigator(){
-  if(locationUiBuilt)return; locationUiBuilt=true;
-  const list=document.querySelector('#locationList'); if(!list)return;
-  walkLocations.forEach((l,i)=>{
-    const b=document.createElement('button');b.className='location-item';b.dataset.location=l.id;
-    b.innerHTML=`<span class="location-index">${String(i+1).padStart(2,'0')}</span><span class="location-copy"><strong>${l.name}</strong><small>${l.sub}</small></span><em>›</em>`;
-    b.onclick=()=>transitionToWalkLocation(l.id);list.appendChild(b);
-  });
-  refreshLocationNavigator();
-}
+
 function cancelWalkTransition(){ walkTransition=null; setTransitionBadge(null,0,false); }
 
 // Location navigation is deliberately a direct viewpoint move. There are no
@@ -1989,17 +2171,41 @@ function cancelWalkTransition(){ walkTransition=null; setTransitionBadge(null,0,
 async function transitionToWalkLocation(id){
   const target=walkLocationById.get(id); if(!target)return;
   if(mode!=='walk') await setMode('walk');
-  buildLocationNavigator();
-  const safe=resolveSafeLocationTarget(target);
-  player.position.set(safe.x,safe.y,safe.z);
+  const anchor=getLocationAnchor(target);
+  if(!anchor){
+    console.warn(`No validated navigation point available for ${target.name}.`);
+    return;
+  }
+  // Marker and visitor share exactly the same validated navigation-space anchor.
+  // Re-test after teleport; if the live BVH moves the capsule materially, abort
+  // instead of ever placing the camera inside architectural geometry.
+  const previousPos=player.position.clone();
+  player.position.set(anchor.x,anchor.y,anchor.feetZ);
   player.velocity.set(0,0,0);
+  player.onGround=false;
   resolveCapsuleCollisions();
+  resolveCapsuleCollisions();
+  const teleportHorizontal=Math.hypot(player.position.x-anchor.x,player.position.y-anchor.y);
+  const teleportVertical=Math.abs(player.position.z-anchor.feetZ);
+  if(teleportHorizontal>.18 || teleportVertical>.24){
+    console.warn(`Rejected unsafe navigation jump to ${target.name}`, {teleportHorizontal,teleportVertical,anchor});
+    player.position.copy(previousPos);
+    player.velocity.set(0,0,0);
+    updateWalkCamera(true);
+    console.warn(`${target.name} is not currently safe to enter.`);
+    return;
+  }
   walkCam.yaw=target.yaw;
   walkCam.pitch=0.015;
   updateWalkCamera(true);
+  // Eye-level verification: camera must match feet + configured human eye height.
+  const expectedEyeZ=player.position.z+walkCam.eyeHeight;
+  if(Math.abs(camera.position.z-expectedEyeZ)>.03){
+    camera.position.z=expectedEyeZ;
+    updateWalkCamera(true);
+  }
   currentWalkLocationId=target.id;
-  setLocationTravelStatus(`Viewing ${target.name}.`);
-  refreshLocationNavigator();
+  refreshCurrentWalkLocation();
   updateTempleZone(true);
 }
 function updateWalkLocationTransition(){ return false; }
@@ -2021,7 +2227,7 @@ async function setMode(next){
   const cross=document.querySelector('#crosshair');
   const dc=document.querySelector('#darshanControls');
   if(next==='darshan'){
-    cancelWalkTransition(); document.querySelector('#locationNavigator')?.classList.add('collapsed');
+    cancelWalkTransition();
     mode='darshan';
     if(temple) temple.frustumCulled=false;
     walkEngaged=false; orbit.enabled=true; orbit.enablePan=false; orbit.rotateSpeed=.45; orbit.zoomSpeed=.55; cross.classList.add('orbit'); btn.textContent='Darshan Mode'; btn.classList.remove('active'); dc?.classList.remove('hidden');
@@ -2255,9 +2461,6 @@ function beginExperience(pilgrimage=false){
   ensureAudio();
   setPilgrimage(pilgrimage);
   walkEngaged=true; mode='walk';
-  buildLocationNavigator();
-  refreshLocationNavigator();
-  document.querySelector('#locationNavigator')?.classList.add('collapsed');
   experience.lastPosition.copy(player.position);
   updateTempleZone(true); updateWalkCamera(true); updateRitualEnvironment();
 }
@@ -2277,13 +2480,6 @@ document.querySelector('#pilgrimageBtn').onclick=()=>setPilgrimage(!experience.p
 document.querySelector('#silenceBtn').onclick=()=>setSilenceMode(!experience.silence);
 document.querySelector('#languageBtn').onclick=toggleLanguage;
 document.querySelector('#modeBtn').onclick=()=>setMode(mode==='walk'?'darshan':'walk');
-document.querySelector('#locationsBtn')?.addEventListener('click',()=>{
-  if(mode!=='walk')return;
-  buildLocationNavigator();refreshLocationNavigator();document.querySelector('#locationNavigator')?.classList.toggle('collapsed');
-});
-document.querySelector('#closeLocations')?.addEventListener('click',()=>document.querySelector('#locationNavigator')?.classList.add('collapsed'));
-document.querySelector('#locationPrev')?.addEventListener('click',()=>{const i=Math.max(0,walkLocations.findIndex(l=>l.id===nearestWalkLocation().id)-1);transitionToWalkLocation(walkLocations[i].id);});
-document.querySelector('#locationNext')?.addEventListener('click',()=>{const i=Math.min(walkLocations.length-1,walkLocations.findIndex(l=>l.id===nearestWalkLocation().id)+1);transitionToWalkLocation(walkLocations[i].id);});
 document.querySelector('#soundBtn').onclick=toggleSound;
 document.querySelector('#qualityBtn')?.addEventListener('click',()=>applyPerformanceMode(performanceState.mode==='performance'?'balanced':'performance'));
 document.querySelector('#helpBtn').onclick=()=>document.querySelector('#helpModal').classList.remove('hidden');
@@ -2362,7 +2558,7 @@ function animate(){
     updateAtmosphere(t, dt * 3);
   }
   if (performanceState.frameCounter % 6 === 0 && !walkTransition) updateTempleStreaming(t);
-  if (performanceState.frameCounter % 30 === 0 && !walkTransition) refreshLocationNavigator();
+  if (performanceState.frameCounter % 30 === 0 && !walkTransition) refreshCurrentWalkLocation();
   updateDarshanTween(dt);
   if(orbit.enabled&&!darshanTween)orbit.update();
   if (performanceState.frameCounter % 2 === 0) {
