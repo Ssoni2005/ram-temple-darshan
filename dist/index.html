@@ -9,7 +9,8 @@
       html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#100705;color:#fff8e8}
       body.app-loading #app>:not(#loading){display:none!important}
       body.app-loading #loading{display:flex!important;visibility:visible!important;opacity:1!important}
-      #loading{position:fixed;inset:0;z-index:9999;display:flex;flex-direction:column;align-items:center;justify-content:center;background:radial-gradient(circle at 50% 43%,#3a180c 0,#1b0b07 34%,#0d0504 78%);font-family:system-ui,sans-serif}
+      #loading{position:fixed;inset:0;z-index:9999;display:flex;flex-direction:column;align-items:center;justify-content:center;background:radial-gradient(circle at 50% 43%,#3a180c 0,#1b0b07 34%,#0d0504 78%);font-family:system-ui,sans-serif;transition:opacity .75s ease,visibility .75s ease}
+      #loading.done{opacity:0!important;visibility:hidden!important;pointer-events:none!important}
       .loader-diya{position:relative;width:120px;height:132px;margin-bottom:10px;filter:drop-shadow(0 14px 24px rgba(0,0,0,.34))}
       .loader-aura{position:absolute;left:50%;top:7px;width:92px;height:92px;transform:translateX(-50%);border-radius:50%;background:radial-gradient(circle,rgba(255,190,70,.28),rgba(255,123,26,.08) 45%,transparent 72%);animation:loaderAura 2.2s ease-in-out infinite}
       .loader-flame{position:absolute;left:50%;top:12px;width:30px;height:52px;transform:translateX(-50%);border-radius:55% 45% 52% 48%/70% 70% 30% 30%;background:linear-gradient(180deg,#fff8ce 0%,#ffd36a 28%,#ff8a24 70%,rgba(221,74,9,.15) 100%);transform-origin:50% 100%;box-shadow:0 0 14px rgba(255,218,105,.9),0 0 36px rgba(255,119,25,.6);animation:loaderFlame .82s ease-in-out infinite alternate}
@@ -21,9 +22,10 @@
       .loading-title{margin-top:2px;font:600 18px Georgia,serif;letter-spacing:.03em}.loading-sub{margin-top:8px;color:#c9b79e;font-size:12px}.progress{width:min(320px,66vw);height:4px;background:rgba(255,255,255,.08);border-radius:999px;margin-top:22px;overflow:hidden}.progress span{display:block;width:0;height:100%;background:linear-gradient(90deg,#ad4a10,#ffbe58,#ffe5a6);transition:width .2s}.progress-text{margin-top:9px;font-size:10px;color:#a89681}
       @keyframes loaderFlame{0%{transform:translateX(-50%) rotate(-3deg) scale(.94,1.02)}35%{transform:translateX(-50%) rotate(2deg) scale(1.03,.96)}68%{transform:translateX(-50%) rotate(-1deg) scale(.98,1.05)}100%{transform:translateX(-50%) rotate(4deg) scale(1.02,.98)}}
       @keyframes loaderAura{50%{transform:translateX(-50%) scale(1.12);opacity:.68}}
+      @keyframes hostStream{from{transform:translateX(-140%)}to{transform:translateX(360%)}}
     </style>
-    <script type="module" crossorigin src="/assets/index-564LARp_.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/index-BZVhW5hv.css">
+    <script type="module" crossorigin src="/assets/index-xX0PQFYg.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-CZmZLjJr.css">
   </head>
   <body class="app-loading">
     <div id="app">
@@ -54,7 +56,6 @@
         <div class="top-actions">
           <button id="pilgrimageBtn" class="pill">Pilgrimage</button>
           <button id="modeBtn" class="pill active">Walk Mode</button>
-          <button id="locationsBtn" class="pill" title="Named locations">Locations</button>
           <button id="qualityBtn" class="pill" title="Rendering quality">Performance</button>
           <button id="silenceBtn" class="icon-btn" title="Silence mode">◌</button>
           <button id="languageBtn" class="icon-btn" title="Narration language">EN</button>
@@ -62,22 +63,6 @@
           <button id="helpBtn" class="icon-btn" title="Controls">?</button>
         </div>
       </header>
-
-      <aside id="locationNavigator" class="location-navigator glass">
-        <div class="location-nav-head">
-          <div>
-            <span>Walk Mode</span>
-            <strong>Locations</strong>
-          </div>
-          <button id="closeLocations" class="close-location" title="Collapse locations">‹</button>
-        </div>
-        <div id="locationList" class="location-list"></div>
-        <div class="location-nav-foot">
-          <button id="locationPrev" title="Previous location">← Previous</button>
-          <small id="locationTravelStatus">Current: <b id="locationCurrent">Main Gate</b></small>
-          <button id="locationNext" title="Next location">Next →</button>
-        </div>
-      </aside>
 
       <div id="walkTransitionBadge" class="walk-transition-badge glass">
         <span>Moving to</span>
