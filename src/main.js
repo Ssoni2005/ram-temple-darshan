@@ -1725,8 +1725,9 @@ function createLocationMarkers() {
       sizeAttenuation: true,
       blending: THREE.NormalBlending
     }));
-    const z = locationGroundZ(loc) + 2.35;
-    marker.position.set(loc.x, loc.y, z);
+    const anchor = getLocationAnchor(loc);
+    const z = anchor.z + walkCam.eyeHeight;
+    marker.position.set(anchor.x, anchor.y, z);
     marker.scale.set(2.8,2.8,1);
     marker.renderOrder=12;
     marker.userData = { locationMarker:true, locationId:loc.id, title:loc.name, sub:loc.sub, index:i };
@@ -1749,10 +1750,11 @@ function updateLocationMarkers(t) {
   const currentZoneId = zoneState.active?.id || null;
   locationMarkers.forEach((m, i) => {
     const loc = walkLocationById.get(m.userData.locationId);
-    const dx = m.position.x - player.position.x;
-    const dy = m.position.y - player.position.y;
+    const anchor = getLocationAnchor(loc);
+    const dx = anchor.x - player.position.x;
+    const dy = anchor.y - player.position.y;
     const dist = Math.hypot(dx, dy);
-    const sameZone = currentZoneId && zoneAt(new THREE.Vector3(loc.x, loc.y, locationGroundZ(loc)))?.id === currentZoneId;
+    const sameZone = currentZoneId && zoneAt(anchor)?.id === currentZoneId;
     const isCurrent = currentWalkLocationId === loc.id;
     // Actual billboard-navigation layer: nearby markers remain readily discoverable,
     // while distant markers fade to keep the temple visually quiet.
@@ -1760,8 +1762,8 @@ function updateLocationMarkers(t) {
     m.visible = reveal;
     if (!reveal) return;
 
-    const bob = 2.35 + Math.sin(t * 1.55 + i * .55) * .12;
-    m.position.z = locationGroundZ(loc) + bob;
+    const bob = walkCam.eyeHeight + Math.sin(t * 1.55 + i * .55) * .06;
+    m.position.set(anchor.x, anchor.y, anchor.z + bob);
     const hover = activeLocationMarker === m;
     const baseScale = hover ? 4.1 : (isCurrent ? 3.35 : 2.8);
     const pulse = 1 + Math.sin(t * 2.0 + i * .7) * (hover ? .045 : .025);
@@ -1903,6 +1905,7 @@ const walkLocations = [
   {id:'north-precinct', name:'North Precinct', sub:'Northern parkota court', x:0, y:150, yaw:Math.PI, parent:'outer-forecourt', floorZ:0.12},
 ];
 const walkLocationById = new Map(walkLocations.map(l=>[l.id,l]));
+const walkLocationAnchorById = new Map();
 let currentWalkLocationId = 'temple-approach';
 let walkTransition = null;
 let locationUiBuilt = false;
@@ -1917,6 +1920,15 @@ function nearestWalkLocation(pos=player.position) {
 }
 function locationGroundZ(l){
   return Number.isFinite(l.floorZ) ? l.floorZ + .08 : groundHeightAt(l.x,l.y,18)+.08;
+}
+
+function getLocationAnchor(l){
+  let anchor = walkLocationAnchorById.get(l.id);
+  if(anchor) return anchor;
+  const safe = resolveSafeLocationTarget(l);
+  anchor = new THREE.Vector3(safe.x, safe.y, safe.z);
+  walkLocationAnchorById.set(l.id, anchor);
+  return anchor;
 }
 
 // Verify direct-jump destinations against the live BVH. This protects against a
